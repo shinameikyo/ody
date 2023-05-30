@@ -1,3 +1,4 @@
+
 <?php
 # TODO The decode is not working
 /**
@@ -18,26 +19,36 @@ function extract_emails($email, $password, $server, $subject, $start, $end) {
     } else {
         # subjectと件名が一致して、今日付で届いたメールを全て確認
         $emails = imap_search($mailbox, 'SUBJECT "' . $subject .'"');
+
         if ($emails) {
             # 指定したファイルを上書きモードで開く
             $file = fopen("output.txt", "w");
+            $mysql_session = connect_mysql_server("localhost", "shina", "magic5580", "ody");
+
             # 該当するmailの数だけ for loop
             foreach ($emails as $email_number) {
+
                 # 本文の取得
                 $message = imap_fetchbody($mailbox, $email_number, 1);
+
                 # 元データがhtmlなのでdecode
                 $decoded_msg = base64_decode($message);
+
                 # 変数に指定したstartとendで囲まれた文のみ抽出
                 $startPos = strpos($decoded_msg, $start);
                 $endPos = strpos($decoded_msg, $end, $startPos + strlen($start));
                 $res = trim(substr($decoded_msg, $startPos + strlen($start), $endPos - $startPos - strlen($start)));
                 echo $res;
+
                 # ファイルに書き込み
                 fwrite($file, $res."\n");
             }
+            # SQLのレコード作成
+            update_mysql_table($res, $mysql_session);
             fclose($file);
             imap_close($mailbox);
             return "Emails written to file successfully";
+
         } else { # emailsが存在しない時の処理
             imap_close($mailbox);
             return "No unread emails with the specified subject were found.";
@@ -51,8 +62,20 @@ function connect_mysql_server($mysqlServer, $username, $password, $dbname) {
     if (!$connection) {
         die('connection failed: '.mysqli_connect_error());
     }
+    echo "connected successfully";
+    return $connection;
 }
-echo "connected successfully";
+
+
+function update_mysql_table($res_from_email_server, $mysql_session) {
+    # SQLのコマンド
+    $sql_query = "INSERT INTO email_data (data) VALUES ('$res_from_email_server')";
+    if ($mysql_session->query($sql_query) === TRUE) {
+        echo "New record created successfully";
+    } else {
+        echo "Error: " . $sql_query . "<br>" . $mysql_session->error;
+    }
+}
 
 # email information
 $email = "shinagawa@meikyo.co.jp";
@@ -62,12 +85,11 @@ $subject = "【OFFICE DE YASAI】";
 $start = "■総務部 小柴";
 $end = "========================";
 # connect to email server
-// echo extract_emails($email, $password, $server, $subject, $start, $end);
+echo extract_emails($email, $password, $server, $subject, $start, $end);
 # mysql information
 $mysqlServer = "localhost";
 $username = "shina";
 $password = "magic5580";
 $dbname = "ody";
 # connect to mysql server
-echo connect_mysql_server($mysqlServer, $username, $password, $dbname);
 ?> 

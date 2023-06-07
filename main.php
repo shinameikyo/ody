@@ -1,16 +1,15 @@
-
 <?php
-# TODO The decode is not working
 /**
-Extracts text from emails that match specific criteria and writes it to a file.
-@param {string} $email - Email address of the account to search.
-@param {string} $password - Password of the email account.
-@param {string} $server - Server address to connect to.
-@param {string} $subject - The subject line to look for in the emails.
-@param {string} $start - The start of the text to extract from the email body.
-@param {string} $end - The end of the text to extract from the email body.
-@return {string} A message indicating success or failure.
-*/
+ * 特定の条件に一致するメールからテキストを抽出し、ファイルに書き込みます。
+ *
+ * @param {string} $email - 検索するアカウントのメールアドレス
+ * @param {string} $password - メールアカウントのパスワード
+ * @param {string} $server - 接続するサーバーアドレス
+ * @param {string} $subject - メールの件名を指定します。
+ * @param {string} $start - メール本文から抽出するテキストの開始位置を指定します。
+ * @param {string} $end - メール本文から抽出するテキストの終了位置を指定します。
+ * @return {string} 成功または失敗を示すメッセージ
+ */
 function extract_emails($emailArray, $mysqlArray) {
     $email = $emailArray['email'];
     $emailPassword = $emailArray['pswd'];
@@ -18,56 +17,60 @@ function extract_emails($emailArray, $mysqlArray) {
     $subject = $emailArray['subject'];
     $start = $emailArray['start'];
     $end = $emailArray['end'];
+    # mailサーバーにアクセス
     $mailbox = imap_open("{" . $server . "}", $email, $emailPassword);
-    # サーバーにアクセスを拒否された場合
+    # mysql sessionを作成
+    $mysql_session = connect_mysql_server($mysqlArray['server'], $mysqlArray['user'], $mysqlArray['pswd'], $mysqlArray['db']);
+    
+    // サーバーにアクセスを拒否された場合
     if ($mailbox === false) {
-        return "Failed to connect to server";
+        return "サーバーへの接続に失敗しました";
     } else {
-        # subjectと件名が一致して、今日付で届いたメールを全て確認
+        // 件名が一致し、今日の日付で受信したメールをすべて確認
         $emails = imap_search($mailbox, 'SUBJECT "' . $subject .'"');
-
+        // 条件に一致したメールリストが存在する場合
         if ($emails) {
             foreach ($emails as $email_number) {
-                $message = imap_fetchbody($mailbox, $email_number, 1);
-                $charset = mb_detect_encoding($message);
-                            
-                mb_internal_encoding('ISO-2022-JP-MS');
-                $decoded_msg = mb_convert_encoding($message, 'UTF-8');
-                $isJapaneseText = containsJapanese($decoded_msg);
+
+                $message = imap_fetchbody($mailbox, $email_number, 1); # メールの本文を取得
+
+                mb_internal_encoding('ISO-2022-JP-MS');  # mbを日本語に設定する
+                $decoded_msg = mb_convert_encoding($message, 'UTF-8'); # mbでデコードを試みる
+
+                $isJapaneseText = containsJapanese($decoded_msg); # 日本語になっているか確認
+
+                # 日本語になっていない場合
                 if (!$isJapaneseText) {
-                    $decoded_msg = base64_decode($message);
-                    $isJapaneseText = containsJapanese($decoded_msg);
-                    if (!$isJapaneseText) {
-                        trigger_error("email number: $email_number は日本語変換できないため、DBへの書き込みは行いません。");
+                    $decoded_msg = base64_decode($message); # base64でデコード
+                    $isJapaneseText = containsJapanese($decoded_msg); #　base64で日本語になっているか確認
+                    # base64で日本語になっていない場合エラー
+                    if (!$isJapaneseText) { 
+                        trigger_error("メール番号：$email_number の変換できない日本語が含まれているため、データベースへの書き込みは行いません。");
                     } else {
-                        # 日本語が含まれた文の処理
-                        $res = trimMessage($decoded_msg, $start, $end);
+                        $res = trimMessage($decoded_msg, $start, $end); # base64で日本語が含まれる場合
                     }
+                # 日本語になっている場合
                 } else {
-                    $res = trimMessage($decoded_msg, $start, $end);
+                    $res = trimMessage($decoded_msg, $start, $end); # 本文から必要な部分のみ抽出
                 }
                 if ($res) {
-                    echo "email num: $email_number";
-                    echo "charset: $charset";
-                    echo "decoded message: $decoded_msg";
-
-                    $mysql_session = connect_mysql_server($mysqlArray['server'], $mysqlArray['user'], $mysqlArray['pswd'], $mysqlArray['db']);
-                    
-                    echo($res);
-                    
-                    # SQLのレコード作成
-                    update_mysql_table($res, $mysql_session);
-                
+                    $lines = explode("\n", $res); # resに複数列の文がインデントされているので、インデントを境にして分ける
+                    echo gettype($lines), count($lines);
+                    foreach ($lines as $line) {
+                        echo "item: ($line)";
+                        update_mysql_table($line, $mysql_session); # mySQLのテーブルに新たなレコードの作成
+                    }
+                    # mb_internal_encoding('ISO-2022-JP-MS')でmbが日本語設定になっているので、デフォルトに戻す
                     mb_internal_encoding();
                     
-                    return "Emails written to file successfully";
+                    return "メールが正常にファイルに書き込まれました";
                 }
             }
-        } else { # emailsが存在しない時の処理
+        } else { // メールが存在しない場合の処理
             imap_close($mailbox);
-            return "No unread emails with the specified subject were found.";
+            return "指定された件名の未読メールは見つかりませんでした。";
         }
-        imap_close($mailbox);
+        imap_close($mailbox); # メールの接続を閉じる
     }
 }
 
